@@ -1,9 +1,12 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Copyright fpwong. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "Framework/Application/IInputProcessor.h"
+#include "Framework/Commands/InputChord.h"
+
+class FUICommandList;
 
 class AUTOSIZECOMMENTS_API FAutoSizeCommentsInputProcessor
 	: public TSharedFromThis<FAutoSizeCommentsInputProcessor>
@@ -14,6 +17,8 @@ public:
 
 	static void Create();
 	static void Cleanup();
+
+	void Init();
 
 	//~ Begin IInputProcessor Interface
 	virtual bool HandleMouseButtonDownEvent(FSlateApplication& SlateApp, const FPointerEvent& MouseEvent) override;
@@ -28,4 +33,6 @@ public:
 
 private:
 	TSet<FKey> KeysDown;
+
+	TSharedPtr<FUICommandList> ASCCommandList;
 };

@@ -1,13 +1,12 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "IDetailCustomization.h"
-
+#include "Framework/Commands/InputChord.h"
 #include "Framework/Text/TextLayout.h"
 #include "Layout/Margin.h"
-
 #include "AutoSizeCommentsSettings.generated.h"
 
 UENUM()
@@ -73,13 +72,13 @@ enum class EASCAutoInsertComment : uint8
 UENUM()
 enum class EASCDefaultCommentColorMethod : uint8
 {
-	/** Use the default engine comment color */
+	/** Do not change the color */
 	None UMETA(DisplayName = "None"),
 
 	/** Use a random color when spawning the comment */
 	Random UMETA(DisplayName = "Random"),
 
-	/** Use the plugin color `DefaultCommentColor` when spawning the comment */
+	/** Apply the default color defined in the settings here */
 	Default UMETA(DisplayName = "Default"),
 };
 
@@ -123,8 +122,13 @@ public:
 	UPROPERTY(EditAnywhere, config, Category = UI)
 	bool bUseDefaultFontSize;
 
+	/** How to color the comment when creating the node */
 	UPROPERTY(EditAnywhere, Config, Category = Color)
 	EASCDefaultCommentColorMethod DefaultCommentColorMethod;
+
+	/** How to color the comment when pressing the `Toggle Header` button */
+	UPROPERTY(EditAnywhere, Config, Category = Color)
+	EASCDefaultCommentColorMethod HeaderColorMethod;
 
 	/** If Use Random Color is not enabled, comment boxes will spawn with this default color */
 	UPROPERTY(EditAnywhere, config, Category = Color, meta=(EditCondition="DefaultCommentColorMethod==EASCDefaultCommentColorMethod::Default", EditConditionHides))
@@ -186,6 +190,14 @@ public:
 	UPROPERTY(EditAnywhere, config, Category = Misc)
 	EASCResizingMode ResizingMode;
 
+	/** Should the comment resize to fit after running user commands in disabled mode */
+    UPROPERTY(EditAnywhere, config, Category = Misc, meta = (EditCondition = "ResizingMode == EASCResizingMode::Disabled", EditConditionHides))
+    bool ResizeToFitWhenDisabled;
+
+	/** In reactive mode, run a 2nd resize so that the title is correctly calculated */
+	UPROPERTY(EditAnywhere, config, Category = Misc, meta = (EditCondition = "ResizingMode == EASCResizingMode::Reactive"))
+	bool bUseTwoPassResize;
+
 	/** Determines when to insert newly created nodes into existing comments */
 	UPROPERTY(EditAnywhere, config, Category = Misc)
 	EASCAutoInsertComment AutoInsertComment;
@@ -235,16 +247,24 @@ public:
 	EASCCacheSaveLocation CacheSaveLocation;
 
 	/** If enabled, nodes will be saved to file when the graph is saved */
-	UPROPERTY(EditAnywhere, config, Category = CommentCache, meta = (EditCondition = "bSaveCommentNodeDataToFile"))
+	UPROPERTY(EditAnywhere, config, Category = CommentCache)
 	bool bSaveCommentDataOnSavingGraph;
 
 	/** If enabled, nodes will be saved to file when the program is exited */
-	UPROPERTY(EditAnywhere, config, Category = CommentCache, meta = (EditCondition = "bSaveCommentNodeDataToFile"))
+	UPROPERTY(EditAnywhere, config, Category = CommentCache)
 	bool bSaveCommentDataOnExit;
 
 	/** If enabled, cache file JSON text will be made more human-readable, but increases file size */
 	UPROPERTY(EditAnywhere, config, Category = CommentCache, AdvancedDisplay)
 	bool bPrettyPrintCommentCacheJSON;
+
+	/** When opening a new graph, existing comments will apply default color settings (suggest disabled) */
+	UPROPERTY(EditAnywhere, config, Category = Initialization)
+	bool bApplyColorToExistingNodes;
+
+	/** When opening a new graph, existing comments will try to fit to their overlapping nodes (suggest disabled) */
+	UPROPERTY(EditAnywhere, config, Category = Initialization)
+	bool bResizeExistingNodes;
 
 	/** Commments will detect and add nodes are underneath on creation */
 	UPROPERTY(EditAnywhere, config, Category = Misc)
@@ -374,6 +394,13 @@ public:
 	{
 		return *GetMutableDefault<UAutoSizeCommentsSettings>();
 	}
+
+	bool ShouldResizeToFit() const
+	{
+		return ResizingMode != EASCResizingMode::Disabled || ResizeToFitWhenDisabled;
+	}
+
+	virtual void PostEditChangeProperty(struct FPropertyChangedEvent& PropertyChangedEvent) override;
 };
 
 class FASCSettingsDetails final : public IDetailCustomization

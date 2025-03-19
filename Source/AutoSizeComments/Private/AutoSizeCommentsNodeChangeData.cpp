@@ -1,9 +1,11 @@
-﻿// Fill out your copyright notice in the Description page of Project Settings.
+﻿// Copyright fpwong. All Rights Reserved.
 
 #include "AutoSizeCommentsNodeChangeData.h"
 
+#include "AutoSizeCommentsModule.h"
 #include "AutoSizeCommentsUtils.h"
 #include "EdGraphNode_Comment.h"
+#include "EdGraphSchema_K2.h"
 #include "K2Node_CreateDelegate.h"
 
 void FASCPinChangeData::UpdatePin(UEdGraphPin* Pin)
@@ -236,4 +238,16 @@ bool FASCCommentChangeData::HasCommentChanged(UEdGraphNode_Comment* Comment)
 	}
 
 	return false;
+}
+
+void FASCCommentChangeData::DebugPrint()
+{
+	UE_LOG(LogAutoSizeComments, Log, TEXT("%s"), *NodeComment);
+	for (auto& Elem : NodeChangeData)
+	{
+		if (Elem.Key.IsValid())
+		{
+			UE_LOG(LogAutoSizeComments, Log, TEXT("\t%s"), *FASCUtils::GetNodeName(Elem.Key.Get()));
+		}
+	}
 }

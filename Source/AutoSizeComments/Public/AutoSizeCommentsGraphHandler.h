@@ -1,4 +1,4 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #pragma once
 
@@ -17,6 +17,8 @@ struct FASCGraphHandlerData
 
 	TMap<FGuid, FASCCommentChangeData> CommentChangeData;
 	FASCGraphData GraphCacheData;
+
+	TArray<TWeakObjectPtr<UEdGraphNode_Comment>> InitialComments;
 
 	float LastZoomLevel = -1;
 	EGraphRenderingLOD::Type LastLOD = EGraphRenderingLOD::Type::DefaultDetail;
@@ -43,14 +45,17 @@ public:
 
 	void ProcessAltReleased(TSharedPtr<SGraphPanel> GraphPanel);
 
-	FASCGraphHandlerData& GetGraphHandlerData(UEdGraph* Graph) { return GraphDatas.FindOrAdd(Graph); }
+	FASCGraphHandlerData& GetGraphHandlerData(UEdGraph* Graph);
 	void UpdateCommentChangeState(UEdGraphNode_Comment* Comment);
 	bool HasCommentChangeState(UEdGraphNode_Comment* Comment) const;
 	bool HasCommentChanged(UEdGraphNode_Comment* Comment);
 
 	TArray<UEdGraph*> GetActiveGraphs();
+	TArray<TSharedPtr<SGraphPanel>> GetActiveGraphPanels();
 
 	EGraphRenderingLOD::Type GetGraphLOD(TSharedPtr<SGraphPanel> GraphPanel);
+
+	void ClearUnrelatedNodes();
 
 private:
 	TMap<TWeakObjectPtr<UEdGraph>, FASCGraphHandlerData> GraphDatas;
@@ -84,6 +89,8 @@ private:
 	void OnObjectSaved(UObject* Object);
 
 	void OnObjectTransacted(UObject* Object, const FTransactionObjectEvent& Event);
+
+	void OnPostGarbageCollect();
 
 	void SaveSizeCache();
 

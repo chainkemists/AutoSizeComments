@@ -1,17 +1,22 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #include "AutoSizeCommentsSettings.h"
 
 #include "AutoSizeCommentsCacheFile.h"
+#include "AutoSizeCommentsGraphHandler.h"
 #include "AutoSizeCommentsMacros.h"
 #include "DetailCategoryBuilder.h"
 #include "DetailLayoutBuilder.h"
 #include "DetailWidgetRow.h"
+#include "Misc/MessageDialog.h"
+#include "Widgets/Input/SButton.h"
 
 UAutoSizeCommentsSettings::UAutoSizeCommentsSettings(const FObjectInitializer& ObjectInitializer) :
 	Super(ObjectInitializer)
 {
 	ResizingMode = EASCResizingMode::Reactive;
+	ResizeToFitWhenDisabled = false;
+	bUseTwoPassResize = true;
 	AutoInsertComment = EASCAutoInsertComment::Always;
 	bSelectNodeWhenClickingOnPin = true;
 	bAutoRenameNewComments = true;
@@ -21,7 +26,8 @@ UAutoSizeCommentsSettings::UAutoSizeCommentsSettings(const FObjectInitializer& O
 	CommentTextAlignment = ETextJustify::Left;
 	DefaultFontSize = 18;
 	bUseDefaultFontSize = false;
-	DefaultCommentColorMethod = EASCDefaultCommentColorMethod::Random;
+	DefaultCommentColorMethod = EASCDefaultCommentColorMethod::None;
+	HeaderColorMethod = EASCDefaultCommentColorMethod::Default;
 	RandomColorOpacity = 1.f;
 	bUseRandomColorFromList = false;
 	PredefinedRandomColorList.Add(FLinearColor(1, 0, 0));
@@ -63,6 +69,8 @@ UAutoSizeCommentsSettings::UAutoSizeCommentsSettings(const FObjectInitializer& O
 	bSaveCommentDataOnSavingGraph = true;
 	bSaveCommentDataOnExit = false;
 	bPrettyPrintCommentCacheJSON = false;
+	bApplyColorToExistingNodes = false;
+	bResizeExistingNodes = false;
 	bDetectNodesContainedForNewComments = true;
 	ResizeChord = FInputChord(EKeys::LeftMouseButton, EModifierKey::Shift);
 	ResizeCollisionMethod = ECommentCollisionMethod::Contained;
@@ -78,7 +86,7 @@ UAutoSizeCommentsSettings::UAutoSizeCommentsSettings(const FObjectInitializer& O
 	bRefreshContainingNodesOnMove = false;
 	bDisableTooltip = true;
 	bHighlightContainingNodesOnSelection = true;
-	bUseMaxDetailNodes = ASC_UE_VERSION_OR_LATER(5, 0);
+	bUseMaxDetailNodes = false;
 	IgnoredGraphs.Add("ControlRigGraph");
 	bSuppressSuggestedSettings = false;
 	bSuppressSourceControlNotification = false;
@@ -94,6 +102,21 @@ UAutoSizeCommentsSettings::UAutoSizeCommentsSettings(const FObjectInitializer& O
 	bDebugGraph_ASC = false;
 	bDisablePackageCleanup = false;
 	bDisableASCGraphNode = false;
+}
+
+void UAutoSizeCommentsSettings::PostEditChangeProperty(FPropertyChangedEvent& PropertyChangedEvent)
+{
+	const FName PropertyName = (PropertyChangedEvent.Property != nullptr) ? PropertyChangedEvent.Property->GetFName() : NAME_None;
+
+	if (PropertyName == GET_MEMBER_NAME_CHECKED(UAutoSizeCommentsSettings, bHighlightContainingNodesOnSelection))
+	{
+		if (!bHighlightContainingNodesOnSelection)
+		{
+			FAutoSizeCommentGraphHandler::Get().ClearUnrelatedNodes();
+		}
+	}
+
+	Super::PostEditChangeProperty(PropertyChangedEvent);
 }
 
 TSharedRef<IDetailCustomization> FASCSettingsDetails::MakeInstance()
