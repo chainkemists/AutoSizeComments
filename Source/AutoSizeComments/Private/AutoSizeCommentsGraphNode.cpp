@@ -1,21 +1,25 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #include "AutoSizeCommentsGraphNode.h"
 
 #include "AutoSizeCommentsCacheFile.h"
 #include "AutoSizeCommentsGraphHandler.h"
 #include "AutoSizeCommentsInputProcessor.h"
+#include "AutoSizeCommentsModule.h"
 #include "AutoSizeCommentsSettings.h"
 #include "AutoSizeCommentsState.h"
 #include "AutoSizeCommentsStyle.h"
 #include "AutoSizeCommentsUtils.h"
 #include "EdGraphNode_Comment.h"
+#include "Editor.h"
 #include "GraphEditorSettings.h"
 #include "K2Node_Knot.h"
 #include "SCommentBubble.h"
 #include "SGraphPanel.h"
 #include "TutorialMetaData.h"
 #include "Framework/Application/SlateApplication.h"
+#include "MaterialGraph/MaterialGraphNode_Comment.h"
+#include "Materials/MaterialExpressionComment.h"
 #include "Runtime/Engine/Classes/EdGraph/EdGraph.h"
 #include "Widgets/SBoxPanel.h"
 #include "Widgets/Images/SImage.h"
@@ -47,9 +51,6 @@ void SAutoSizeCommentsGraphNode::Construct(const FArguments& InArgs, class UEdGr
 	const UAutoSizeCommentsSettings& ASCSettings = UAutoSizeCommentsSettings::Get();
 
 	const bool bIsPresetStyle = IsPresetStyle();
-
-	// init color
-	InitializeColor(ASCSettings, bIsPresetStyle, bIsHeader);
 
 	// use default font
 	if (ASCSettings.bUseDefaultFontSize && !bIsHeader && !bIsPresetStyle)
@@ -93,7 +94,6 @@ void SAutoSizeCommentsGraphNode::InitializeColor(const UAutoSizeCommentsSettings
 {
 	if (bIsHeaderComment)
 	{
-		ApplyHeaderStyle();
 		return;
 	}
 
@@ -161,8 +161,7 @@ void SAutoSizeCommentsGraphNode::InitializeCommentBubbleSettings()
 		CommentNode->bColorCommentBubble = ASCSettings.bDefaultColorCommentBubble;
 		CommentNode->bCommentBubbleVisible_InDetailsPanel = ASCSettings.bDefaultShowBubbleWhenZoomed;
 		CommentNode->bCommentBubblePinned = ASCSettings.bDefaultShowBubbleWhenZoomed;
-		CommentNode->SetMakeCommentBubbleVisible(ASCSettings.bDefaultShowBubbleWhenZoomed);
-		bRequireUpdate = true;
+		CommentNode->bCommentBubbleVisible = ASCSettings.bDefaultShowBubbleWhenZoomed;
 	}
 }
 
@@ -241,6 +240,15 @@ void SAutoSizeCommentsGraphNode::MoveTo(const FVector2D& NewPosition, FNodeSet& 
 			}
 		}
 	}
+
+	// from SGraphNodeMaterialComment
+	if (UMaterialGraphNode_Comment* MaterialComment = Cast<UMaterialGraphNode_Comment>(CommentNode))
+	{
+		MaterialComment->MaterialExpressionComment->MaterialExpressionEditorX = CommentNode->NodePosX;
+		MaterialComment->MaterialExpressionComment->MaterialExpressionEditorY = CommentNode->NodePosY;
+		MaterialComment->MaterialExpressionComment->MarkPackageDirty();
+		MaterialComment->MaterialDirtyDelegate.ExecuteIfBound();
+	}
 }
 
 FReply SAutoSizeCommentsGraphNode::OnMouseButtonDown(const FGeometry& MyGeometry, const FPointerEvent& MouseEvent)
@@ -292,7 +300,10 @@ FReply SAutoSizeCommentsGraphNode::OnMouseButtonUp(const FGeometry& MyGeometry, 
 
 		ResetNodesUnrelated();
 
-		ResizeToFit();
+		if (UAutoSizeCommentsSettings::Get().ShouldResizeToFit())
+		{
+			ResizeToFit();
+		}
 
 		return FReply::Handled().ReleaseMouseCapture();
 	}
@@ -437,6 +448,14 @@ void SAutoSizeCommentsGraphNode::Tick(const FGeometry& AllottedGeometry, const d
 
 	UpdateRefreshDelay();
 
+	if (TwoPassResizeDelay > 0)
+	{
+		if (--TwoPassResizeDelay == 0)
+		{
+			ResizeToFit_Impl();
+		}
+	}
+
 	if (RefreshNodesDelay == 0 && !IsHeaderComment() && !bUserIsDragging)
 	{
 		const FModifierKeysState& KeysState = FSlateApplication::Get().GetModifierKeys();
@@ -508,12 +527,6 @@ void SAutoSizeCommentsGraphNode::Tick(const FGeometry& AllottedGeometry, const d
 		{
 			CommentBubble->UpdateBubble();
 		}
-	}
-
-	if (bCachedColorCommentBubble != CommentNode->bColorCommentBubble)
-	{
-		bRequireUpdate = true;
-		bCachedColorCommentBubble = CommentNode->bColorCommentBubble;
 	}
 
 	// Update cached font size
@@ -788,8 +801,13 @@ void SAutoSizeCommentsGraphNode::InitializeASCNode(const TArray<TWeakObjectPtr<U
 		}
 	}
 
+	// if this node is selected then we have been copy pasted, don't add all selected nodes
+	bool bHasBeenCopyPasted = InitialSelectedNodes.Contains(CommentNode);
+
 	if (!bInitialized)
 	{
+		UE_LOG(LogAutoSizeComments, VeryVerbose, TEXT("Init ASC node %p %s %d %d"), this, *CommentNode->NodeGuid.ToString(), IsExistingComment(), bHasBeenCopyPasted);
+
 		bInitialized = true;
 
 		// register graph
@@ -812,7 +830,14 @@ void SAutoSizeCommentsGraphNode::InitializeASCNode(const TArray<TWeakObjectPtr<U
 		if (!CommentData.HasBeenInitialized())
 		{
 			CommentData.SetInitialized(true);
-			InitializeCommentBubbleSettings();
+
+			// don't initialize without any selected nodes!
+			const bool bShouldApplyColor = !bHasBeenCopyPasted && (!IsExistingComment() || UAutoSizeCommentsSettings::Get().bApplyColorToExistingNodes);
+			if (bShouldApplyColor)
+			{
+				InitializeCommentBubbleSettings();
+				InitializeColor(UAutoSizeCommentsSettings::Get(), false, GetCommentData().IsHeader());
+			}
 		}
 	}
 }
@@ -995,6 +1020,11 @@ FReply SAutoSizeCommentsGraphNode::HandleRefreshButtonClicked()
 	{
 		FASCUtils::ClearCommentNodes(CommentNode);
 		AddAllSelectedNodes(true);
+
+		if (UAutoSizeCommentsSettings::Get().ShouldResizeToFit())
+		{
+			ResizeToFit();
+		}
 	}
 
 	return FReply::Handled();
@@ -1003,18 +1033,36 @@ FReply SAutoSizeCommentsGraphNode::HandleRefreshButtonClicked()
 FReply SAutoSizeCommentsGraphNode::HandlePresetButtonClicked(const FPresetCommentStyle Style)
 {
 	ApplyPresetStyle(Style);
+
+	if (UAutoSizeCommentsSettings::Get().ShouldResizeToFit())
+	{
+		ResizeToFit();
+	}
+
 	return FReply::Handled();
 }
 
 FReply SAutoSizeCommentsGraphNode::HandleAddButtonClicked()
 {
 	AddAllSelectedNodes(true);
+
+	if (UAutoSizeCommentsSettings::Get().ShouldResizeToFit())
+	{
+		ResizeToFit();
+	}
+
 	return FReply::Handled();
 }
 
 FReply SAutoSizeCommentsGraphNode::HandleSubtractButtonClicked()
 {
 	RemoveAllSelectedNodes(true);
+
+	if (UAutoSizeCommentsSettings::Get().ShouldResizeToFit())
+	{
+		ResizeToFit();
+	}
+
 	return FReply::Handled();
 }
 
@@ -1216,7 +1264,14 @@ void SAutoSizeCommentsGraphNode::UpdateRefreshDelay()
 		{
 			RefreshNodesInsideComment(ECommentCollisionMethod::Point);
 
-			ResizeToFit();
+			// so that it doesn't trigger the auto resize check
+			FAutoSizeCommentGraphHandler::Get().UpdateCommentChangeState(CommentNode);
+
+			if (IsExistingComment() && UAutoSizeCommentsSettings::Get().bResizeExistingNodes)
+			{
+				ResizeToFit();
+			}
+			// else - we have been copy pasted don't resize
 
 			if (UAutoSizeCommentsSettings::Get().bEnableFixForSortDepthIssue)
 			{
@@ -1462,6 +1517,16 @@ FASCCommentData& SAutoSizeCommentsGraphNode::GetCommentData() const
 
 void SAutoSizeCommentsGraphNode::ResizeToFit()
 {
+	ResizeToFit_Impl();
+
+	if (UAutoSizeCommentsSettings::Get().bUseTwoPassResize && GetResizingMode() == EASCResizingMode::Reactive)
+	{
+		TwoPassResizeDelay = 2;
+	}
+}
+
+void SAutoSizeCommentsGraphNode::ResizeToFit_Impl()
+{
 	DECLARE_SCOPE_CYCLE_COUNTER(TEXT("SAutoSizeCommentsGraphNode::ResizeToFit"), STAT_ASC_ResizeToFit, STATGROUP_AutoSizeComments);
 
 	// resize to fit the bounds of the nodes under the comment
@@ -1527,9 +1592,23 @@ void SAutoSizeCommentsGraphNode::ResizeToFit()
 
 void SAutoSizeCommentsGraphNode::ApplyHeaderStyle()
 {
-	FPresetCommentStyle Style = UAutoSizeCommentsSettings::Get().HeaderStyle;
-	CommentNode->CommentColor = Style.Color;
-	CommentNode->FontSize = Style.FontSize;
+	switch (UAutoSizeCommentsSettings::Get().HeaderColorMethod)
+	{
+		case EASCDefaultCommentColorMethod::Random:
+		{
+			RandomizeColor();
+			break;
+		}
+		case EASCDefaultCommentColorMethod::Default:
+		{
+			const FPresetCommentStyle& Style = UAutoSizeCommentsSettings::Get().HeaderStyle;
+			CommentNode->CommentColor = Style.Color;
+			CommentNode->FontSize = Style.FontSize;
+			break;
+		}
+		default:
+			break;
+	}
 }
 
 void SAutoSizeCommentsGraphNode::ApplyPresetStyle(const FPresetCommentStyle& Style)
@@ -1831,6 +1910,11 @@ void SAutoSizeCommentsGraphNode::CreateColorControls()
 TSet<TSharedPtr<SAutoSizeCommentsGraphNode>> SAutoSizeCommentsGraphNode::GetOtherCommentNodes()
 {
 	TSharedPtr<SGraphPanel> OwnerPanel = GetOwnerPanel();
+	if (!OwnerPanel || !OwnerPanel.IsValid())
+	{
+		return TSet<TSharedPtr<SAutoSizeCommentsGraphNode>>();
+	}
+
 	FChildren* PanelChildren = OwnerPanel->GetAllChildren();
 	int32 NumChildren = PanelChildren->Num();
 
@@ -1999,17 +2083,20 @@ void SAutoSizeCommentsGraphNode::SetIsHeader(bool bNewValue, bool bUpdateStyle)
 		}
 		else // undo header style
 		{
-			const UAutoSizeCommentsSettings& ASCSettings = UAutoSizeCommentsSettings::Get();
-			if (ASCSettings.DefaultCommentColorMethod == EASCDefaultCommentColorMethod::Random)
+			// only refresh the color if the color matches the header style color 
+			if (CommentNode->CommentColor == UAutoSizeCommentsSettings::Get().HeaderStyle.Color)
 			{
-				RandomizeColor();
-			}
-			else
-			{
-				CommentNode->CommentColor = ASCSettings.DefaultCommentColor;
+				if (UAutoSizeCommentsSettings::Get().DefaultCommentColorMethod == EASCDefaultCommentColorMethod::Random)
+				{
+					RandomizeColor();
+				}
+				else
+				{
+					CommentNode->CommentColor = UAutoSizeCommentsSettings::Get().DefaultCommentColor;
+				}
 			}
 
-			CommentNode->FontSize = ASCSettings.DefaultFontSize;
+			CommentNode->FontSize = UAutoSizeCommentsSettings::Get().DefaultFontSize;
 			AdjustMinSize(UserSize);
 			CommentNode->ResizeNode(UserSize);
 		}
@@ -2093,6 +2180,17 @@ void SAutoSizeCommentsGraphNode::ResetNodesUnrelated()
 		}
 	}
 #endif
+}
+
+bool SAutoSizeCommentsGraphNode::IsExistingComment() const
+{
+	if (CommentNode)
+	{
+		FASCGraphHandlerData& GraphData = FAutoSizeCommentGraphHandler::Get().GetGraphHandlerData(CommentNode->GetGraph());
+		return GraphData.InitialComments.Contains(CommentNode);
+	}
+
+	return false;
 }
 
 EASCResizingMode SAutoSizeCommentsGraphNode::GetResizingMode() const

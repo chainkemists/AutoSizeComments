@@ -1,10 +1,13 @@
-﻿// Copyright 2021 fpwong. All Rights Reserved.
+﻿// Copyright fpwong. All Rights Reserved.
 
 #pragma once
 
 #include "CoreMinimal.h"
 #include "AutoSizeCommentsMacros.h"
+#include "EditorStyleSet.h"
 #include "Framework/Commands/Commands.h"
+
+class FUICommandList;
 
 /**
  * 
@@ -22,4 +25,10 @@ public:
 	virtual ~FASCCommands() override { }
 
 	virtual void RegisterCommands() override;
+
+	TSharedPtr<FUICommandInfo> ResizeSelectedComment;
+
+	static TSharedPtr<FUICommandList> MakeCommandList();
+
+	static void RunResizeSelectedComment();
 };

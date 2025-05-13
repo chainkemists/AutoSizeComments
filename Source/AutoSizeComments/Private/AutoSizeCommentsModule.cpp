@@ -1,8 +1,9 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #include "AutoSizeCommentsModule.h"
 
 #include "AutoSizeCommentsCacheFile.h"
+#include "AutoSizeCommentsCommands.h"
 #include "AutoSizeCommentsGraphHandler.h"
 #include "AutoSizeCommentsGraphPanelNodeFactory.h"
 #include "AutoSizeCommentsInputProcessor.h"
@@ -10,9 +11,10 @@
 #include "AutoSizeCommentsSettings.h"
 #include "AutoSizeCommentsStyle.h"
 #include "ISettingsModule.h"
+#include "PropertyEditorModule.h"
+#include "Misc/CoreDelegates.h"
 
 #define LOCTEXT_NAMESPACE "FAutoSizeCommentsModule"
-
 #define ASC_ENABLED (!IS_MONOLITHIC && !UE_BUILD_SHIPPING && !UE_BUILD_TEST && !UE_GAME && !UE_SERVER)
 
 DEFINE_LOG_CATEGORY(LogAutoSizeComments)
@@ -47,6 +49,8 @@ void FAutoSizeCommentsModule::OnPostEngineInit()
 		FPropertyEditorModule& PropertyModule = FModuleManager::GetModuleChecked<FPropertyEditorModule>("PropertyEditor");
 		PropertyModule.RegisterCustomClassLayout(UAutoSizeCommentsSettings::StaticClass()->GetFName(), FOnGetDetailCustomizationInstance::CreateStatic(&FASCSettingsDetails::MakeInstance));
 	}
+
+	FASCCommands::Register();
 
 	FAutoSizeCommentGraphHandler::Get().BindDelegates();
 
@@ -93,6 +97,8 @@ void FAutoSizeCommentsModule::ShutdownModule()
 	FAutoSizeCommentsCacheFile::Get().Cleanup();
 
 	FASCStyle::Shutdown();
+
+	FASCCommands::Unregister();
 #endif
 }
 

@@ -400,8 +400,18 @@ bool FASCUtils::RemoveNodesFromComment(UEdGraphNode_Comment* Comment, const TSet
 		return false;
 	}
 
-	bool bDidRemoveAnything = false;
 	const FCommentNodeSet NodesUnderComment = Comment->GetNodesUnderComment();
+
+	// don't do anything if we have nothing to remove
+	const bool bRemoveSomething = NodesUnderComment.ContainsByPredicate([&NodesToRemove](const UObject* Obj)
+	{
+		return NodesToRemove.Contains(Obj);
+	});
+
+	if (!bRemoveSomething)
+	{
+		return false;
+	}
 
 	// Clear all nodes under comment
 	Comment->ClearNodesUnderComment();
@@ -415,10 +425,6 @@ bool FASCUtils::RemoveNodesFromComment(UEdGraphNode_Comment* Comment, const TSet
 			{
 				AddNodeIntoComment(Comment, NodeUnderComment, false);
 			}
-			else
-			{
-				bDidRemoveAnything = true;
-			}
 		}
 	}
 
@@ -427,7 +433,7 @@ bool FASCUtils::RemoveNodesFromComment(UEdGraphNode_Comment* Comment, const TSet
 		FAutoSizeCommentsCacheFile::Get().UpdateNodesUnderComment(Comment);
 	}
 
-	return bDidRemoveAnything;
+	return true;
 }
 
 bool FASCUtils::AddNodeIntoComment(UEdGraphNode_Comment* Comment, UObject* NewNode, bool bUpdateCache)

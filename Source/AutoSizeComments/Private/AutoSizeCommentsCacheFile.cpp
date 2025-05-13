@@ -1,4 +1,4 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #include "AutoSizeCommentsCacheFile.h"
 
@@ -81,7 +81,7 @@ void FAutoSizeCommentsCacheFile::LoadCacheFromFile()
 			UE_LOG(LogAutoSizeComments, Log, TEXT("Failed to load auto size comments cache: %s"), *GetCachePath(true));
 		}
 	}
-	else
+	else if (FPlatformFileManager::Get().GetPlatformFile().FileExists(*OldCachePath))
 	{
 		FFileHelper::LoadFileToString(FileData, *OldCachePath);
 

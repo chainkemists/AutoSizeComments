@@ -1,4 +1,4 @@
-// Copyright 2021 fpwong. All Rights Reserved.
+// Copyright fpwong. All Rights Reserved.
 
 #include "AutoSizeCommentsGraphHandler.h"
 
@@ -9,9 +9,13 @@
 #include "AutoSizeCommentsState.h"
 #include "AutoSizeCommentsUtils.h"
 #include "EdGraphNode_Comment.h"
+#include "EdGraphSchema_K2.h"
+#include "Editor.h"
 #include "GraphEditAction.h"
 #include "K2Node_Knot.h"
 #include "SGraphPanel.h"
+#include "EdGraph/EdGraph.h"
+#include "Framework/Application/SlateApplication.h"
 #include "Framework/Notifications/NotificationManager.h"
 #include "Misc/LazySingleton.h"
 #include "Widgets/Notifications/SNotificationList.h"
@@ -135,6 +139,7 @@ void FAutoSizeCommentGraphHandler::BindDelegates()
 #endif
 
 	FCoreUObjectDelegates::OnObjectTransacted.AddRaw(this, &FAutoSizeCommentGraphHandler::OnObjectTransacted);
+	FCoreUObjectDelegates::GetPostGarbageCollect().AddRaw(this, &FAutoSizeCommentGraphHandler::OnPostGarbageCollect);
 }
 
 void FAutoSizeCommentGraphHandler::UnbindDelegates()
@@ -145,6 +150,8 @@ void FAutoSizeCommentGraphHandler::UnbindDelegates()
 	FCoreUObjectDelegates::OnObjectSaved.RemoveAll(this);
 #endif
 	FCoreUObjectDelegates::OnObjectTransacted.RemoveAll(this);
+
+	FCoreUObjectDelegates::GetPostGarbageCollect().RemoveAll(this);
 
 	for (const auto& Kvp : GraphDatas)
 	{
@@ -170,12 +177,8 @@ void FAutoSizeCommentGraphHandler::BindToGraph(UEdGraph* Graph)
 		return;
 	}
 
-	GraphDatas.Remove(nullptr);
-
-	FASCGraphHandlerData GraphData;
-	GraphData.OnGraphChangedHandle = Graph->AddOnGraphChangedHandler(FOnGraphChanged::FDelegate::CreateRaw(this, &FAutoSizeCommentGraphHandler::OnGraphChanged));
-
-	GraphDatas.Add(Graph, GraphData);
+	// calling this Get function will initialize the graph (binding delegates)
+	GetGraphHandlerData(Graph);
 
 	CheckCacheDataError(Graph);
 }
@@ -239,7 +242,7 @@ void FAutoSizeCommentGraphHandler::AutoInsertIntoCommentNodes(TWeakObjectPtr<UEd
 			auto ContainingComments = FASCUtils::GetContainingCommentNodes(CommentNodes, NodeToTakeFrom);
 			for (UEdGraphNode_Comment* CommentNode : ContainingComments)
 			{
-				CommentNode->AddNodeUnderComment(Node);
+				FASCUtils::AddNodeIntoComment(CommentNode, Node);
 			}
 		};
 	};
@@ -572,6 +575,13 @@ void FAutoSizeCommentGraphHandler::ProcessAltReleased(TSharedPtr<SGraphPanel> Gr
 				CommentNode->ClearNodesUnderComment();
 				ASCGraphNode->AddAllNodesUnderComment(NewSelection.Array(), false);
 				ChangedGraphNodes.Add(ASCGraphNode);
+
+				if (UAutoSizeCommentsSettings::Get().ResizingMode != EASCResizingMode::Disabled)
+				{
+					ASCGraphNode->ResizeToFit();
+				}
+
+				ASCGraphNode->UpdateCache();
 			}
 		}
 	}
@@ -590,6 +600,28 @@ void FAutoSizeCommentGraphHandler::ProcessAltReleased(TSharedPtr<SGraphPanel> Gr
 	}));
 }
 
+FASCGraphHandlerData& FAutoSizeCommentGraphHandler::GetGraphHandlerData(UEdGraph* Graph)
+{
+	if (!GraphDatas.Contains(Graph))
+	{
+		FASCGraphHandlerData GraphData;
+
+		// read comments that already exist in the graph
+		for (auto Node : Graph->Nodes)
+		{
+			if (auto Comment = Cast<UEdGraphNode_Comment>(Node))
+			{
+				GraphData.InitialComments.Add(Comment);
+			}
+		}
+
+		GraphData.OnGraphChangedHandle = Graph->AddOnGraphChangedHandler(FOnGraphChanged::FDelegate::CreateRaw(this, &FAutoSizeCommentGraphHandler::OnGraphChanged));
+		GraphDatas.Add(Graph, GraphData);
+	}
+
+	return GraphDatas[Graph]; 
+}
+
 void FAutoSizeCommentGraphHandler::UpdateCommentChangeState(UEdGraphNode_Comment* Comment)
 {
 	UEdGraph* Graph = Comment->GetGraph();
@@ -598,7 +630,7 @@ void FAutoSizeCommentGraphHandler::UpdateCommentChangeState(UEdGraphNode_Comment
 		return;
 	}
 
-	FASCGraphHandlerData& GraphData = GraphDatas.FindOrAdd(Graph);
+	FASCGraphHandlerData& GraphData = GetGraphHandlerData(Graph);
 	GraphData.CommentChangeData.FindOrAdd(Comment->NodeGuid).UpdateComment(Comment);
 }
 
@@ -644,6 +676,20 @@ TArray<UEdGraph*> FAutoSizeCommentGraphHandler::GetActiveGraphs()
 	}
 
 	return ActiveGraphs;
+}
+
+TArray<TSharedPtr<SGraphPanel>> FAutoSizeCommentGraphHandler::GetActiveGraphPanels()
+{
+	TArray<TSharedPtr<SGraphPanel>> OutGraphPanels;
+	for (TWeakPtr<SGraphPanel> ActiveGraphPanel : ActiveGraphPanels)
+	{
+		if (ActiveGraphPanel.IsValid())
+		{
+			OutGraphPanels.Add(ActiveGraphPanel.Pin());
+		}
+	}
+
+	return OutGraphPanels;
 }
 
 bool FAutoSizeCommentGraphHandler::Tick(float DeltaTime)
@@ -692,8 +738,8 @@ void FAutoSizeCommentGraphHandler::UpdateNodeUnrelatedState()
 				}
 			}
 
-			// clear the unrelated nodes and empty the last selection set
-			if (bSelectedNonComment || (SelectedComments.Num() == 0 && GraphData->LastSelectionSet.Num() != 0))
+			// if we deselected everything, clear the unrelated nodes and empty the last selection set
+			if (SelectedComments.Num() == 0 && GraphData->LastSelectionSet.Num() != 0)
 			{
 				for (UEdGraphNode* Node : Graph->Nodes)
 				{
@@ -749,6 +795,20 @@ void FAutoSizeCommentGraphHandler::UpdateNodeUnrelatedState()
 						Node->SetNodeUnrelated(false);
 					}
 				}
+			}
+		}
+	}
+}
+
+void FAutoSizeCommentGraphHandler::ClearUnrelatedNodes()
+{
+	for (auto& Elem : GraphDatas)
+	{
+		if (Elem.Key.IsValid())
+		{
+			for (UEdGraphNode* NodeToUpdate : Elem.Key->Nodes)
+			{
+				NodeToUpdate->SetNodeUnrelated(false);
 			}
 		}
 	}
@@ -941,6 +1001,12 @@ void FAutoSizeCommentGraphHandler::OnObjectTransacted(UObject* Object, const FTr
 		}
 		
 	}
+}
+
+void FAutoSizeCommentGraphHandler::OnPostGarbageCollect()
+{
+	// cleanup invalid graphs
+	GraphDatas.Remove(nullptr);
 }
 
 void FAutoSizeCommentGraphHandler::SaveSizeCache()
