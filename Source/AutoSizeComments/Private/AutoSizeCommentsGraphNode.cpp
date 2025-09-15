@@ -441,8 +441,6 @@ void SAutoSizeCommentsGraphNode::Tick(const FGeometry& AllottedGeometry, const d
 		UserSize.Y = CommentNode->NodeHeight;
 	}
 
-	UpdateRefreshDelay();
-
 	if (TwoPassResizeDelay > 0)
 	{
 		if (--TwoPassResizeDelay == 0)
@@ -451,7 +449,7 @@ void SAutoSizeCommentsGraphNode::Tick(const FGeometry& AllottedGeometry, const d
 		}
 	}
 
-	if (RefreshNodesDelay == 0 && !IsHeaderComment() && !bUserIsDragging)
+	if (!IsHeaderComment() && !bUserIsDragging)
 	{
 		const FModifierKeysState& KeysState = FSlateApplication::Get().GetModifierKeys();
 
@@ -654,7 +652,11 @@ void SAutoSizeCommentsGraphNode::UpdateGraphNode()
 		.WrapTextAt(this, &SAutoSizeCommentsGraphNode::GetWrapAt)
 		.MultiLine(true)
 		.ModiferKeyForNewLine(EModifierKey::Shift)
-		.Justification(CommentTextAlignment);
+		.Justification(CommentTextAlignment)
+#if ASC_UE_VERSION_OR_LATER(5, 6)
+		.DelayedLeftClickEntersEditMode(false)
+#endif
+		; // ending semicolon because of macro (is there a nicer way of doing this?)
 
 	// Create the top horizontal box containing anchor points (header comments don't need these)
 	TSharedRef<SHorizontalBox> TopHBox = SNew(SHorizontalBox);
@@ -881,7 +883,7 @@ void SAutoSizeCommentsGraphNode::InitializeNodesUnderComment(const TArray<TWeakO
 	// if this node is selected then we have been copy pasted, don't add all selected nodes
 	if (InitialSelectedNodes.Contains(CommentNode))
 	{
-		RefreshNodesDelay = 2;
+		GEditor->GetTimerManager()->SetTimerForNextTick(FTimerDelegate::CreateRaw(this, &SAutoSizeCommentsGraphNode::InitialDetectNodes));
 		return;
 	}
 
@@ -914,7 +916,28 @@ void SAutoSizeCommentsGraphNode::InitializeNodesUnderComment(const TArray<TWeakO
 	if (UAutoSizeCommentsSettings::Get().bDetectNodesContainedForNewComments)
 	{
 		// Refresh the nodes under the comment
-		RefreshNodesDelay = 2;
+		GEditor->GetTimerManager()->SetTimerForNextTick(FTimerDelegate::CreateRaw(this, &SAutoSizeCommentsGraphNode::InitialDetectNodes));
+	}
+}
+
+void SAutoSizeCommentsGraphNode::InitialDetectNodes()
+{
+	// possibly could cause some collision issues when the node is initialized offscreen
+	// since our bounds (specifically title size) uses GetDesiredSize
+	RefreshNodesInsideComment(ECommentCollisionMethod::Point);
+
+	// so that it doesn't trigger the auto resize check
+	FAutoSizeCommentGraphHandler::Get().UpdateCommentChangeState(CommentNode);
+
+	if (IsExistingComment() && UAutoSizeCommentsSettings::Get().bResizeExistingNodes)
+	{
+		ResizeToFit();
+	}
+	// else - we have been copy pasted don't resize
+
+	if (UAutoSizeCommentsSettings::Get().bEnableFixForSortDepthIssue)
+	{
+		FAutoSizeCommentGraphHandler::Get().RequestGraphVisualRefresh(GetOwnerPanel());
 	}
 }
 
@@ -1253,45 +1276,6 @@ FSlateColor SAutoSizeCommentsGraphNode::GetCommentTextColor() const
 {
 	constexpr FLinearColor TransparentGray(1.0f, 1.0f, 1.0f, 0.4f);
 	return IsNodeUnrelated() ? TransparentGray : FLinearColor::White;
-}
-
-void SAutoSizeCommentsGraphNode::UpdateRefreshDelay()
-{
-	if (GetDesiredSize().IsZero())
-	{
-		return;
-	}
-
-	const FASCVector2 NodePosition = GetPos();
-	const FASCVector2 BottomRight = NodePosition + FASCVector2(1, 1);
-	if (!OwnerGraphPanelPtr.Pin().Get()->IsRectVisible(NodePosition, BottomRight))
-	{
-		return;
-	}
-
-	if (RefreshNodesDelay > 0)
-	{
-		RefreshNodesDelay -= 1;
-
-		if (RefreshNodesDelay == 0)
-		{
-			RefreshNodesInsideComment(ECommentCollisionMethod::Point);
-
-			// so that it doesn't trigger the auto resize check
-			FAutoSizeCommentGraphHandler::Get().UpdateCommentChangeState(CommentNode);
-
-			if (IsExistingComment() && UAutoSizeCommentsSettings::Get().bResizeExistingNodes)
-			{
-				ResizeToFit();
-			}
-			// else - we have been copy pasted don't resize
-
-			if (UAutoSizeCommentsSettings::Get().bEnableFixForSortDepthIssue)
-			{
-				FAutoSizeCommentGraphHandler::Get().RequestGraphVisualRefresh(GetOwnerPanel());
-			}
-		}
-	}
 }
 
 void SAutoSizeCommentsGraphNode::RefreshNodesInsideComment(const ECommentCollisionMethod OverrideCollisionMethod, const bool bIgnoreKnots, const bool bUpdateExistingComments)
