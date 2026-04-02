@@ -44,20 +44,15 @@ UAutoSizeCommentsSettings::UAutoSizeCommentsSettings(const FObjectInitializer& O
 
 	// define tagged preset
 	{
-		FPresetCommentStyle TodoPreset;
+		FPresetCommentButtonStyle TodoPreset;
 		TodoPreset.Color = FColor(0, 255, 255);
-		TaggedPresets.Add("@TODO", TodoPreset);
-
-		FPresetCommentStyle FixmePreset;
-		FixmePreset.Color = FColor::Red;
-		TaggedPresets.Add("@FIXME", FixmePreset);
-
-		FPresetCommentStyle InfoPreset;
-		InfoPreset.Color = FColor::White;
-		InfoPreset.bSetHeader = true;
-		TaggedPresets.Add("@INFO", InfoPreset);
+		TodoPreset.PresetPrefix = "@TODO";
+		TodoPreset.bShowAsButton = false;
+		PresetStyles.Add(TodoPreset);
 	}
+
 	bAggressivelyUseDefaultColor = false;
+	bUseNodeSizeForBounds = true;
 	bUseCommentBubbleBounds = true;
 	bMoveEmptyCommentBoxes = false;
 	EmptyCommentBoxSpeed = 10;
